@@ -7,7 +7,7 @@ filename = sprintf('_%s_%g_%g_%g_%g_%g_%g_%g_%g_%g',...
     distribution_s,r,s0,a, M,L,N,tf,f0,run);
 
 % Output used in external programs
-global ts Nlineage T tcoal Ksample
+global ts Nlineage T tcoal Ksample wsample
 
 %% Arguments:
 % distribution_s is one of the four forms below
@@ -26,8 +26,8 @@ rng(run)
 yessave=0; % save figure or not?
 yesplot=0; % plotting anything but Fig 1?
 
-%% Mutations
-NUbs2=0.05;                      % N*Ub*s^2
+%% Mutations are optional and entered here:
+NUbs2=0;                      % N*Ub*s^2
 mu=NUbs2/N/s0^2/L;
 %%
 
@@ -77,7 +77,7 @@ Knew=zeros(N,L);  % binary DNA sequences
 Anew=zeros(N,L);  % ancestor labels
 Pnew=zeros(N,L);  % parent labels
 
-tint=tf/5; % plot time interval 
+tint=tf/3; % plot time interval 
 col='rgbmkrgbmkrgbmkrgbmk';
 
 %% Initial population
@@ -103,6 +103,7 @@ A=(1:N)'*ones(1,L);  % Initial ancestor labels used for C(t)
 
 P1=zeros(N,length(T)); Pm=P1; PL=P1; % Initial parent labels for 3 sites in time, for phylogeny 
 W=P1;                                % Initial fitness values
+Sig2=zeros(length(T),L);
 
 %% Evolution starts...
 for t=T
@@ -135,8 +136,9 @@ for t=T
     
 %% Random sampling of progeny and natural selection with a broken stick
 
-    % column of N log-fitnesses ; state with 0s only has w=0 (fitness 1) by definition
+% column of N log-fitnesses ; state with 0s only has w=0 (fitness 1) by definition
     w=K*(s'); 
+% add epistasis here! Input parameters Tij, Eij are set separately in the beginning.
     
     nprogav=exp(w)/mean(exp(w));    % average progeny number
     b2=cumsum(nprogav);
@@ -165,11 +167,16 @@ for t=T
     
     %% Memorizing observables 
     W(:,t+1)=K*(s');                % fitness column
+    if tint*round(t/tint)==t
+    for jj=1:L
+        Sig2(t+1,jj)=std(K(:,1:jj)*s(1:jj)')^2;          % Variation of segment fitness 
+    end
+    Sig2(t+1,:)=Sig2(t+1,:)/Sig2(t+1,L);   % normalized variation of segment fitness
+    end
     P1(:,t+1)=P(:,1);               % parent labels for 3 sites  
     Pm(:,t+1)=P(:,L/2); 
     PL(:,t+1)=P(:,L);                 
-    %ipol=find(~all(1-K,1));         % non-lost allele site  indices
-    ipol=find(~all(K.*(1-K)));       % heterozygous site  indices
+    ipol=find(~all(1-K,1));         % non-lost allele site  indices
     Closs(t+1)=1-length(ipol)/L;    % fraction of sites with extinct (or non heterozygous) alleles
     fsite(t+1,:)=mean(K);           % 1-site allele frequencies at all sites
     fav(t+1)=mean(mean(K));         % average allele frequency per site per genome
@@ -190,11 +197,8 @@ for t=T
     w2av(t+1)= mean(w2); 
     nlineages(t+1)=length(unique(reshape(A,[1,N*L])));  % total dictinct lineage number
     Plinkav(t+1,:)= mean(Plink);  
-    
-   
     %allowed=fsite(t+1,:) > 0 && fsite(t+1,:) < 1; % binary mask of polymorphous sites
-
-        
+     
     % Ancestor spectrum and C
     nanc =[];nmax=zeros(1,L);
     for i=1:1:L
@@ -215,7 +219,7 @@ for t=T
     nmax=nmax(ipol);
     
     %% Plotting the wave and ancestral clone  spectrum at some time points
-    if tint*round(t/tint)==t %&& yesplot
+    if tint*round(t/tint)==t && yesplot
         c=col(round(t/tint)+1);
         figure(2)
      subplot( tf/tint +2,1,1)
@@ -256,12 +260,29 @@ for t=T
         plot(0:(L-1),LD,c)
         hold on
     end
-
+    
+        %% Testing block independence at some points
+    if tint*round(t/tint)==t && yesplot
+        c=col(round(t/tint)+1);
+        figure(10)
+        plot(1:L,Sig2(t+1,:),c)
+        iii=round(t/tf*(L-1)+1);
+        text(iii,Sig2(t+1,iii),sprintf('t=%g',t))
+        xlabel('Segment length')
+        ylabel('Fitness variance normalized')
+        hold on
+    end
 end
 
 % Evolution has ended
 
 %% Final plots
+
+if yesplot 
+    figure(10);hold off
+end
+
+if yesplot
 figure(2) % Traveling wave
 subplot( tf/tint +2,1,1)
 hold off
@@ -272,9 +293,9 @@ title(ts)   % title  with parameter values
  xlabel('Family size/N ');
   subplot( tf/tint +2,2,2*tf/tint +4)
  xlabel('Max family size/N ');
- 
+
 %% 
-if yesplot
+
 figure(3)  % LD
 hold off
 xlabel('Locus distance');
@@ -372,9 +393,10 @@ end %yesplot
 
 %% Phylogeny plots
 
-if yesplot
+nsample=1:N/10:N; %  genome indices in the sample below
+
+if yesplot  % whether to do plots apart from the basic dynamics in Fig. 1
     
-nsample=1:N/10:N; % sample of genomes
 nlineage1=nsample; % initial lineage labels
 nlineagem=nsample; 
 nlineageL=nsample;
@@ -497,10 +519,14 @@ title('Phylogeny of last locus'); box off
 axis([0 tf+1 0 length(nsample)+1])
 xlabel('Time'); ylabel('Lineages')
 
-%% Memorize the last sequences of the sample for MEGA inference
-Ksample=K(nsample,:);
 
 end %yesplot
+
+
+%% Memorize the last sequences of the sample for MEGA inference and their fitness values
+Ksample=K(nsample,:);
+wsample=w(nsample);
+
 
 %% obsolete coal density
 % Number of lineages and coal. density vs time 
